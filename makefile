@@ -1,29 +1,53 @@
 .POSIX:
 .SUFFIXES:
 
+include config.mk
+
 prefix := lib/lowdown
 src = autolink.c buffer.c diff.c document.c entity.c gemini.c html.c \
 html_escape.c latex.c library.c libdiff.c nroff.c odt.c smartypants.c term.c \
 tree.c util.c compats.c
-obj = $(src:.c=.o)
-cflags = -Ilib/lowdown/ -L. -lm -Wall -pedantic
-ifdef DEBUG
-DEFINES = -DDEBUG
-DEBUGFLAG = -g$(DEBUG)
+cflags = $(INCS) -Wall -pedantic
+ldflags = -lm
+optimize = -Os
+
+# link to static libc archive
+libc := lib/musl/lib/libc.a
+
+ifdef debug
+optimize = -Og
+defines = -Ddebug
+debugflag = -g$(debug)
 endif
 
-muss: liblowdown.a
-	$(CC) $(DEBUGFLAG) -o $@ src/main.c $(cflags) -l:$^ $(DEFINES)
+all: muss options
 
-liblowdown.a: $(obj)
-	ar cr $@ $^
+options:
+	@echo muss build options:
+	@echo "CFLAGS  = $(cflags)"
+	@echo "LDFLAGS = $(ldflags)"
+	@echo "CC      = $(CC)"
+	@echo ""
+	@echo "NOTE: make sure to run 'make musl' before 'make'"
 
-$(obj):
-	$(CC) $(DEBUGFLAG) -c $(addprefix $(prefix)/, $(src))
+muss: liblowdown.o
+	$(CC) -static $(debugflag) -c src/main.c $(cflags) $(defines) $(optimize)
+	$(CC) -static -o $@ main.o $^ $(ldflags) $(cflags) $(optimize) $(libc)
+
+liblowdown.o:
+	$(CC) -static $(debugflag) -r -o $@ $(addprefix $(prefix)/, $(src)) $(optimize) $(libc)
 
 clean:
-	rm -rf $(obj)
-	rm -rf liblowdown.a
+	rm -rf liblowdown.o
+	rm -rf main.o
 	rm -rf muss
+	rm -rf libc.o
 
-.PHONY: clean
+# if you want to compile only the static library
+liblowdown: liblowdown.o
+	ar cr -o $@.a $^
+
+musl:
+	sh sh/libc.sh
+
+.PHONY: clean musl options
