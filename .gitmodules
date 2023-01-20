@@ -1,0 +1,6 @@
+[submodule "lib/lowdown"]
+	path = lib/lowdown
+	url = https://github.com/kristapsdz/lowdown
+[submodule "lib/mustach"]
+	path = lib/mustach
+	url = https://gitlab.com/jobol/mustach.git
