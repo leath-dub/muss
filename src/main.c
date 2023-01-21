@@ -34,6 +34,7 @@ Buf *markdown_to_html(char *filename);
 int free_buf(Buf *buf);
 
 static char msgbuf[MSGBUFLEN] = {0};
+static int flags = Mustach_With_ErrorUndefined;
 
 /**
  * Function returns a reference to a heap allocated Buf type,
@@ -107,6 +108,34 @@ free_buf(Buf *buf)
     return 0;
 }
 
+int
+file_to_buf(char *filename, char **buf)
+{
+    int rc;
+    int fd;
+    long fsz;
+    struct stat inode;
+
+    /* get stats about file, we need the size */
+    rc = stat(filename, &inode);
+    if (rc == -1) {
+        strerror_r(errno, msgbuf, MSGBUFLEN);
+        errx(EXIT_FAILURE, "%s: %s", msgbuf, filename);
+    }
+    fsz = inode.st_size;
+
+    *buf = malloc(fsz);
+    if (*buf == NULL) {
+        strerror_r(errno, msgbuf, MSGBUFLEN);
+        errx(EXIT_FAILURE, "%s", msgbuf);
+    }
+
+    fd = open(filename, O_RDONLY);
+    read(fd, *buf, fsz);
+    close(fd);
+    return fsz;
+}
+
 void
 parse_json(char *template, char *filename)
 {
@@ -118,18 +147,7 @@ parse_json(char *template, char *filename)
     cJSON *json;
 
     /* first we need to open the file and read the contents to a string */
-    rc = stat(filename, &inode);
-    if (rc == -1) {
-        strerror_r(errno, msgbuf, MSGBUFLEN);
-        errx(EXIT_FAILURE, "%s: %s", msgbuf, filename);
-    }
-    fsz = inode.st_size;
-
-    buf = malloc(fsz);
-    if (buf == NULL) {
-        strerror_r(errno, msgbuf, MSGBUFLEN);
-        errx(EXIT_FAILURE, "%s", msgbuf);
-    }
+    fsz = file_to_buf(filename, &buf);
 
     fd = open(filename, O_RDONLY);
     read(fd, buf, fsz);
@@ -137,9 +155,16 @@ parse_json(char *template, char *filename)
 
     json = cJSON_Parse(buf);
     if (json == NULL) {
+        close(fd);
         errx(EXIT_FAILURE, "\033[31merror parsing json %s\n%s", filename, cJSON_GetErrorPtr());
     }
-    mustach_cJSON_fd(template, 0, json, 0, 0);
+
+    rc = mustach_cJSON_fd(template, 0, json, flags, 0);
+    if (rc < 0) {
+        close(fd);
+        fputs("\033[31m<-- ", stderr);
+        errx(EXIT_FAILURE, "error parsing template %s", filename);
+    }
 
     free(buf);
     free(json);
@@ -161,6 +186,9 @@ main(int argc, char **argv)
         free_buf(markdown);
     }
     */
-    parse_json("Hello {{ name }}", "test.json");
+    char *template;
+    int sz = file_to_buf("template.html", &template);
+    parse_json(template, "test.json");
+    free(template);
     return 0;
 }
