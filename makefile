@@ -9,7 +9,7 @@ html_escape.c latex.c library.c libdiff.c nroff.c odt.c smartypants.c term.c \
 tree.c util.c compats.c
 cflags = $(INCS) -Wall -pedantic
 ldflags = -lm
-optimize = -Os
+optimize = -O3
 
 # link to static libc archive
 libc := lib/musl/lib/libc.a
@@ -32,7 +32,7 @@ options:
 
 muss: liblowdown.o
 	$(CC) -static $(debugflag) -c src/main.c $(cflags) $(defines) $(optimize)
-	$(CC) -static -o $@ main.o $^ $(ldflags) $(cflags) $(optimize) $(libc)
+	$(CC) -static $(debugflag) -o $@ main.o $^ $(ldflags) $(cflags) $(optimize) $(libc)
 
 liblowdown.o:
 	$(CC) -static $(debugflag) -r -o $@ $(addprefix $(prefix)/, $(src)) $(optimize) $(libc)
