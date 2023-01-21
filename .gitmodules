@@ -7,3 +7,6 @@
 [submodule "lib/musl"]
 	path = lib/musl
 	url = https://git.musl-libc.org/git/musl
+[submodule "lib/cJSON"]
+	path = lib/cJSON
+	url = https://github.com/DaveGamble/cJSON

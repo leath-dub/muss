@@ -1,20 +1,25 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <sys/queue.h>
+#include <sys/stat.h>
 #include <unistd.h>
-#include <fcntl.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
 #include <err.h>
 #include <string.h>
+#include <fcntl.h>
 
 /**
  * Temp for development, lowdown.h is all you really want
- * #include "lowdown.h"
  */
 #include "../lib/lowdown/lowdown.h"
+#include "../lib/mustach/mustach-cjson.h"
+#include "../lib/include/cjson/cJSON.h"
 // #include "lowdown.h"
+// #include "mustach.h"
+// #include "cJSON.h"
+
 #define BUFSIZE 0x2000
 #define BUFMAX 0x5F5E100
 #define MAXMSG 50
@@ -35,7 +40,8 @@ static char msgbuf[MSGBUFLEN] = {0};
  * it is up to the caller to free Buf and Buf->buf
  */
 Buf *
-markdown_to_html(char *filename) {
+markdown_to_html(char *filename)
+{
     Buf *result;
     char *buf;
     size_t bufsz;
@@ -66,6 +72,7 @@ markdown_to_html(char *filename) {
         strerror_r(errno, msgbuf, MSGBUFLEN);
         errx(EXIT_FAILURE, "%s: %s", msgbuf, filename);
     }
+
     rc = lowdown_file(&opts, fp, &buf, &bufsz, NULL);
     if (rc == 0) {
         fclose(fp);
@@ -74,6 +81,11 @@ markdown_to_html(char *filename) {
 
     /* set the result */
     result = malloc(sizeof(Buf));
+    if (result == NULL) {
+        fclose(fp);
+        strerror_r(errno, msgbuf, MSGBUFLEN);
+        errx(EXIT_FAILURE, "%s", msgbuf);
+    }
     result->buf = buf;
     result->sz = bufsz;
 
@@ -83,23 +95,62 @@ markdown_to_html(char *filename) {
 }
 
 int
-free_buf(Buf *buf) {
+free_buf(Buf *buf)
+{
     if (buf == NULL) {
         warn("passed null reference to free_buf, not freeing");
         return 1;
     }
-    /* free char buf */
+
     free(buf->buf);
-
-    /* free the object */
     free(buf);
-
     return 0;
 }
+
+void
+parse_json(char *template, char *filename)
+{
+    int rc;
+    long fsz;
+    struct stat inode;
+    char *buf;
+    int fd;
+    cJSON *json;
+
+    /* first we need to open the file and read the contents to a string */
+    rc = stat(filename, &inode);
+    if (rc == -1) {
+        strerror_r(errno, msgbuf, MSGBUFLEN);
+        errx(EXIT_FAILURE, "%s: %s", msgbuf, filename);
+    }
+    fsz = inode.st_size;
+
+    buf = malloc(fsz);
+    if (buf == NULL) {
+        strerror_r(errno, msgbuf, MSGBUFLEN);
+        errx(EXIT_FAILURE, "%s", msgbuf);
+    }
+
+    fd = open(filename, O_RDONLY);
+    read(fd, buf, fsz);
+    close(fd);
+
+    json = cJSON_Parse(buf);
+    if (json == NULL) {
+        errx(EXIT_FAILURE, "\033[31merror parsing json %s\n%s", filename, cJSON_GetErrorPtr());
+    }
+    mustach_cJSON_fd(template, 0, json, 0, 0);
+
+    free(buf);
+    free(json);
+}
+
+
 
 int
 main(int argc, char **argv)
 {
+    /*
     if (argc > 1) {
         Buf *markdown = markdown_to_html(argv[1]);
         write(0, markdown->buf, markdown->sz);
@@ -109,5 +160,7 @@ main(int argc, char **argv)
         write(0, markdown->buf, markdown->sz);
         free_buf(markdown);
     }
+    */
+    parse_json("Hello {{ name }}", "test.json");
     return 0;
 }

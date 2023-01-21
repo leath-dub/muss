@@ -7,4 +7,4 @@ VERSION = 0.1
 CC = tcc
 
 # includes and libs
-INCS = -Ilib/lowdown/
+INCS = -Ilib/lowdown/ -Ilib/mustach/ -Ilib/include
