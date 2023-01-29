@@ -1,194 +1,146 @@
-#include <stddef.h>
-#include <stdio.h>
-#include <sys/queue.h>
-#include <sys/stat.h>
-#include <unistd.h>
+#include "lib.h"
+#include "option.h"
+
 #include <stdlib.h>
-#include <stdio.h>
-#include <errno.h>
 #include <err.h>
-#include <string.h>
-#include <fcntl.h>
+#include <stdint.h>
 
 /**
- * Temp for development, lowdown.h is all you really want
+ * Lowdown headers
  */
+#include <sys/queue.h>
+#include <stdio.h>
 #include "../lib/lowdown/lowdown.h"
+
 #include "../lib/mustach/mustach-cjson.h"
 #include "../lib/include/cjson/cJSON.h"
-// #include "lowdown.h"
-// #include "mustach.h"
-// #include "cJSON.h"
 
-#define BUFSIZE 0x2000
-#define BUFMAX 0x5F5E100
-#define MAXMSG 50
-#define MSGBUFLEN 50
+struct option_t commandline_options[] = {
+    {"html",   ".",             dir_isvalid},
+    {"markup", ".",             dir_isvalid},
+    {"vars",   "./config.json", file_isvalid},
+    {"out",    "./out",         dir_create},
+    0
+};
 
-typedef struct {
-    char *buf;
-    size_t sz;
-} Buf;
+typedef char *(*callback) (FILE *);
 
-Buf *markdown_to_html(char *filename);
-int free_buf(Buf *buf);
+char *apply_template(cJSON *cjson, char *filename, callback call);
 
-static char msgbuf[MSGBUFLEN] = {0};
-static int flags = Mustach_With_ErrorUndefined;
+static int mustach_flags = Mustach_With_ErrorUndefined;
 
-/**
- * Function returns a reference to a heap allocated Buf type,
- * it is up to the caller to free Buf and Buf->buf
- */
-Buf *
-markdown_to_html(char *filename)
+char *
+apply_template(cJSON *cjson, char *filename, callback call)
 {
-    Buf *result;
-    char *buf;
-    size_t bufsz;
-    FILE *fp;
     int rc;
+    FILE *tmp;
+    buffer *contents;
+    char *result;
+    long resultsz;
 
-    struct lowdown_opts opts;
-    memset(&opts, 0, sizeof(struct lowdown_opts));
-    opts.type = LOWDOWN_HTML;
-    opts.feat = LOWDOWN_FOOTNOTES |
-        LOWDOWN_AUTOLINK |
-        LOWDOWN_TABLES |
-        LOWDOWN_SUPER |
-        LOWDOWN_STRIKE |
-        LOWDOWN_FENCED |
-        LOWDOWN_COMMONMARK |
-        LOWDOWN_DEFLIST |
-        LOWDOWN_IMG_EXT |
-        LOWDOWN_METADATA;
-    opts.oflags = LOWDOWN_HTML_HEAD_IDS |
-        LOWDOWN_HTML_NUM_ENT |
-        LOWDOWN_HTML_OWASP |
-        LOWDOWN_SMARTY |
-        LOWDOWN_STANDALONE;
+    contents = buffer_new_file(filename);
+    tmp = tmpfile();
+    rc = mustach_cJSON_file(
+        buffer_raw(contents),
+        buffer_get_length(contents),
+        cjson, mustach_flags, tmp
+    );
+    free(contents);
 
-    fp = fopen(filename, "r");
-    if (fp == NULL) {
-        strerror_r(errno, msgbuf, MSGBUFLEN);
-        errx(EXIT_FAILURE, "%s: %s", msgbuf, filename);
+    if (call) {
+        rewind(tmp);
+        result = call(tmp);
+    } else {
+        fseek(tmp, 0, SEEK_END);
+        resultsz = ftell(tmp);
+        rewind(tmp);
+        result = calloc(1, resultsz + 1);
+        errnox(result == NULL, NULL);
+        fread(result, 1, resultsz, tmp);
     }
+    fclose(tmp);
 
-    rc = lowdown_file(&opts, fp, &buf, &bufsz, NULL);
-    if (rc == 0) {
-        fclose(fp);
-        errx(EXIT_FAILURE, "error calling lowdown_file");
-    }
-
-    /* set the result */
-    result = malloc(sizeof(Buf));
-    if (result == NULL) {
-        fclose(fp);
-        strerror_r(errno, msgbuf, MSGBUFLEN);
-        errx(EXIT_FAILURE, "%s", msgbuf);
-    }
-    result->buf = buf;
-    result->sz = bufsz;
-
-    /* clean up */
-    fclose(fp);
     return result;
 }
 
-int
-free_buf(Buf *buf)
-{
-    if (buf == NULL) {
-        warn("passed null reference to free_buf, not freeing");
-        return 1;
-    }
+struct task_t {
+    char *outputfile;
+    char *contents;
+};
 
-    free(buf->buf);
-    free(buf);
-    return 0;
+char *extensions[] = {
+    ".md", ".html"
+};
+callback extension_handler[] = {
+    markdown_to_html,
+    NULL
+};
+
+/* returns a task or NULL */
+struct task_t *
+build_task(cJSON *cjson, char *inputfile, struct option_t *options)
+{
+    int pos;
+    callback handler;
+    struct task_t *task;
+
+    pos = match_extensions(extensions, arrlength(extensions), inputfile);
+    if (pos < 0) return 0;
+
+    task = calloc(1, sizeof(struct task_t));
+
+    task->outputfile = get_output_file(inputfile, ".html", get_option("out", options)->value);
+    task->contents = apply_template(cjson, inputfile, extension_handler[pos]);
+
+    return task;
 }
 
-int
-file_to_buf(char *filename, char **buf)
-{
-    int rc;
-    int fd;
-    long fsz;
-    struct stat inode;
-
-    /* get stats about file, we need the size */
-    rc = stat(filename, &inode);
-    if (rc == -1) {
-        strerror_r(errno, msgbuf, MSGBUFLEN);
-        errx(EXIT_FAILURE, "%s: %s", msgbuf, filename);
-    }
-    fsz = inode.st_size;
-
-    *buf = malloc(fsz);
-    if (*buf == NULL) {
-        strerror_r(errno, msgbuf, MSGBUFLEN);
-        errx(EXIT_FAILURE, "%s", msgbuf);
-    }
-
-    fd = open(filename, O_RDONLY);
-    read(fd, *buf, fsz);
-    close(fd);
-    return fsz;
-}
-
-void
-parse_json(char *template, char *filename)
-{
-    int rc;
-    long fsz;
-    struct stat inode;
-    char *buf;
-    int fd;
-    cJSON *json;
-
-    /* first we need to open the file and read the contents to a string */
-    fsz = file_to_buf(filename, &buf);
-
-    fd = open(filename, O_RDONLY);
-    read(fd, buf, fsz);
-    close(fd);
-
-    json = cJSON_Parse(buf);
-    if (json == NULL) {
-        close(fd);
-        errx(EXIT_FAILURE, "\033[31merror parsing json %s\n%s", filename, cJSON_GetErrorPtr());
-    }
-
-    rc = mustach_cJSON_fd(template, 0, json, flags, 0);
-    if (rc < 0) {
-        close(fd);
-        fputs("\033[31m<-- ", stderr);
-        errx(EXIT_FAILURE, "error parsing template %s", filename);
-    }
-
-    free(buf);
-    free(json);
-}
-
-
+/**
+ * 2023-01-29
+ * TODO: so we have the basis of what we need, all we need now is to
+ * generate the inputs from a directory - recursively attempting to make
+ * tasks on each file encountered (adding those tasks to an array). Then
+ * once you have an array of tasks which hold the outputs in memory,
+ * you just validate the output destinations ( make sure your not overriting
+ * files and the outputs are unique maybe ?, make sure path is valid, etc )
+ * then finally you generate the paths needed and write to the outputfiles,
+ * thats it !
+ */
 
 int
 main(int argc, char **argv)
 {
+    parse_opts(argc, argv, commandline_options);
+    validate_opts(commandline_options);
+
+    buffer *contents;
+    struct task_t *task;
+
+    contents = buffer_new_file(get_option("vars", commandline_options)->value);
+    cJSON *cjson = cJSON_Parse(buffer_raw(contents));
+    free(contents);
+
+    task = build_task(cjson, "test.html", commandline_options);
+
+    cJSON_Delete(cjson);
+
+    // puts(task->outputfile);
+    puts(task->contents);
+
+    free(task->outputfile);
+    free(task->contents);
+    free(task);
+
     /*
-    if (argc > 1) {
-        Buf *markdown = markdown_to_html(argv[1]);
-        write(0, markdown->buf, markdown->sz);
-        free_buf(markdown);
-    } else {
-        Buf *markdown = markdown_to_html("./test.md");
-        write(0, markdown->buf, markdown->sz);
-        free_buf(markdown);
-    }
+
+    buffer *contents;
+    contents = buffer_new_file(get_option("vars", commandline_options)->value);
+    cJSON *cjson = cJSON_Parse(buffer_raw(contents));
+    apply_template(cjson, "test.html", NULL);
+    cJSON_Delete(cjson);
+    free(contents);
     */
-    char *template;
-    int sz = file_to_buf("template.html", &template);
-    parse_json(template, "test.json");
-    free(template);
-    return 0;
+
+// mkpath("hello/guys/this/is/a/path", 26, 0700);
+return 0;
 }

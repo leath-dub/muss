@@ -3,13 +3,17 @@
 
 include config.mk
 
+src = src/main.c src/lib.c src/option.c
+obj = main.o lib.o option.o
+headers = src/lib.h src/option.h
+
 prefix := lib
 lowdown_src = autolink.c buffer.c diff.c document.c entity.c gemini.c html.c \
 html_escape.c latex.c library.c libdiff.c nroff.c odt.c smartypants.c term.c \
 tree.c util.c compats.c
 mustach_src = mustach.c mustach-wrap.c mustach-cjson.c
 cjson_src = cJSON.c
-cflags = $(INCS) -Wall -pedantic
+cflags = $(INCS) -Wall -pedantic -std=c99
 ldflags = -lm
 optimize = -O3
 
@@ -33,8 +37,8 @@ options:
 	@echo "NOTE: make sure to run 'make musl' before 'make'"
 
 muss: libcjson.o libmustach.o liblowdown.o
-	$(CC) -static $(debugflag) -c src/main.c $(cflags) $(defines) $(optimize)
-	$(CC) -static $(debugflag) -o $@ main.o $^ $(ldflags) $(cflags) $(optimize) $(libc)
+	$(CC) -static $(debugflag) -c $(src) $(cflags) $(defines) $(optimize)
+	$(CC) -static $(debugflag) -o $@ $(obj) $^ $(ldflags) $(cflags) $(optimize) $(libc)
 
 liblowdown.o:
 	$(CC) -static $(debugflag) -r -o $@ $(addprefix $(prefix)/lowdown/, $(lowdown_src)) $(optimize) $(libc)
@@ -61,11 +65,21 @@ musl:
 	sh sh/libc.sh
 
 clean:
-	rm -rf liblowdown.o
-	rm -rf libmustach.o
-	rm -rf libcjson.o
-	rm -rf main.o
-	rm -rf muss
-	rm -rf libc.o
+	rm -f liblowdown.o
+	rm -f libmustach.o
+	rm -f libcjson.o
+	rm -f $(obj)
+	rm -f muss
+	rm -f libc.o
 
-.PHONY: all options musl clean
+# like clean but only recompiles project object files
+clean-src:
+	rm -f $(obj)
+	rm -f muss
+
+build: all
+
+watch:
+	echo $(src) $(headers) | tr ' ' '\n' | entr make clean-src build CC=gcc
+
+.PHONY: all options musl clean clean-src build watch
