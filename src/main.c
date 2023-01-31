@@ -22,15 +22,16 @@ struct option_t commandline_options[] = {
     {"out",    "./out",         dir_create},
     0
 };
+cJSON *root_cjson;
 
-typedef char *(*callback) (FILE *);
+typedef charsz * (*hook) (char *, long);
 
-char *apply_template(cJSON *cjson, char *filename, callback call);
+char *apply_template(cJSON *cjson, char *filename);
 
 static int mustach_flags = Mustach_With_ErrorUndefined;
 
 char *
-apply_template(cJSON *cjson, char *filename, callback call)
+apply_template(cJSON *cjson, char *filename)
 {
     int rc;
     FILE *tmp;
@@ -47,20 +48,34 @@ apply_template(cJSON *cjson, char *filename, callback call)
     );
     free(contents);
 
-    if (call) {
-        rewind(tmp);
-        result = call(tmp);
-    } else {
-        fseek(tmp, 0, SEEK_END);
-        resultsz = ftell(tmp);
-        rewind(tmp);
-        result = calloc(1, resultsz + 1);
-        errnox(result == NULL, NULL);
-        fread(result, 1, resultsz, tmp);
-    }
+    fseek(tmp, 0, SEEK_END);
+    resultsz = ftell(tmp);
+    rewind(tmp);
+    result = calloc(1, resultsz + 1);
+    errnox(result == NULL, NULL);
+    fread(result, 1, resultsz, tmp);
     fclose(tmp);
 
     return result;
+}
+
+charsz *
+buf_apply_template(char *bin, long sz)
+{
+    int rc;
+    char *result;
+    size_t resultsz;
+    charsz *ret = calloc(1, sizeof(charsz));
+
+    rc = mustach_cJSON_mem(
+        bin, sz, root_cjson,
+        mustach_flags, &result, &resultsz
+    );
+
+    ret->value = result;
+    ret->sz = resultsz;
+
+    return ret;
 }
 
 struct task_t {
@@ -71,17 +86,17 @@ struct task_t {
 char *extensions[] = {
     ".md", ".html"
 };
-callback extension_handler[] = {
-    markdown_to_html,
-    NULL
+charsz *(*extension_hook_handler[][8]) (char *, long sz) = {
+    { buf_apply_template, markdown_to_html, 0 },
+    { buf_apply_template, 0 },
+    0
 };
 
 /* returns a task or NULL */
 struct task_t *
-build_task(cJSON *cjson, char *inputfile, struct option_t *options)
+build_task(char *inputfile, struct option_t *options)
 {
     int pos;
-    callback handler;
     struct task_t *task;
 
     pos = match_extensions(extensions, arrlength(extensions), inputfile);
@@ -90,7 +105,24 @@ build_task(cJSON *cjson, char *inputfile, struct option_t *options)
     task = calloc(1, sizeof(struct task_t));
 
     task->outputfile = get_output_file(inputfile, ".html", get_option("out", options)->value);
-    task->contents = apply_template(cjson, inputfile, extension_handler[pos]);
+
+    FILE *fp = fopen(inputfile, "r");
+    long sz = filesz(inputfile);
+    char *raw = calloc(sz, 1);
+    charsz *curr = NULL;
+    charsz *prev = NULL;
+    fread(raw, 1, sz, fp);
+
+    for (int i = 0; extension_hook_handler[pos][i]; i += 1) {
+        prev = curr;
+        curr = extension_hook_handler[pos][i](raw, sz);
+        if (prev) {
+            free(prev->value);
+            free(prev);
+        }
+    }
+
+    task->contents = curr->value;
 
     return task;
 }
@@ -117,30 +149,18 @@ main(int argc, char **argv)
     struct task_t *task;
 
     contents = buffer_new_file(get_option("vars", commandline_options)->value);
-    cJSON *cjson = cJSON_Parse(buffer_raw(contents));
+    root_cjson = cJSON_Parse(buffer_raw(contents));
     free(contents);
 
-    task = build_task(cjson, "test.html", commandline_options);
+    task = build_task("test.html", commandline_options);
 
-    cJSON_Delete(cjson);
+    cJSON_Delete(root_cjson);
 
-    // puts(task->outputfile);
+    puts(task->outputfile);
     puts(task->contents);
 
     free(task->outputfile);
     free(task->contents);
     free(task);
-
-    /*
-
-    buffer *contents;
-    contents = buffer_new_file(get_option("vars", commandline_options)->value);
-    cJSON *cjson = cJSON_Parse(buffer_raw(contents));
-    apply_template(cjson, "test.html", NULL);
-    cJSON_Delete(cjson);
-    free(contents);
-    */
-
-// mkpath("hello/guys/this/is/a/path", 26, 0700);
-return 0;
+    return 0;
 }

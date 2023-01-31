@@ -7,6 +7,11 @@
 
 typedef void buffer;
 
+typedef struct {
+    char *value;
+    long sz;
+} charsz;
+
 void errnox(int cond, char *extra);
 long filesz(char *filename);
 void cat(char *filename);
@@ -24,5 +29,5 @@ int first_set_bit(uint32_t mask);
 int match_extensions(char **extensions, int length, char *filename);
 void mkpath(char *_path, int length, mode_t mode);
 
-char *markdown_to_html(FILE *tmpfile_ptr);
+charsz *markdown_to_html(char *bin, long sz);
 char *get_output_file(char *inputfile, char *extension, char *outdir);

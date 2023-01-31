@@ -252,12 +252,13 @@ mkpath(char *_path, int length, mode_t mode)
     errnox((rc < 0) && (errno != EEXIST), NULL);
 }
 
-char *
-markdown_to_html(FILE *tmpfile_ptr)
+charsz *
+markdown_to_html(char *bin, long sz)
 {
     int rc;
-    char *buf;
-    size_t bufsz;
+    char *result;
+    size_t resultsz;
+    charsz *ret = calloc(1, sizeof(charsz));
     struct lowdown_opts opts;
 
     memset(&opts, 0, sizeof(struct lowdown_opts));
@@ -277,12 +278,20 @@ markdown_to_html(FILE *tmpfile_ptr)
         LOWDOWN_SMARTY |
         LOWDOWN_STANDALONE;
 
-    rc = lowdown_file(&opts, tmpfile_ptr, &buf, &bufsz, NULL);
+    /*
+    int	 lowdown_buf(const struct lowdown_opts *, 
+    		const char *, size_t,
+    		char **, size_t *, struct lowdown_metaq *);
+    */
+    rc = lowdown_buf(&opts, bin, sz, &result, &resultsz, NULL);
     if (rc == 0) {
         errx(1, "error calling lowdown_file");
     }
 
-    return buf;
+    ret->value = result;
+    ret->sz = resultsz;
+
+    return ret;
 }
 
 char *
